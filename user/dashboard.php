@@ -1,4 +1,5 @@
 <?php
+
 /**
  * User Dashboard
  * PHP 8.4 Pure Functional Script
@@ -28,7 +29,7 @@ $recent_orders = db_query(
 
 // Page title
 $page_title = 'My Dashboard';
-
+$page= 'Dashboard';
 // Include header
 require_once __DIR__ . '/../partials/header.php';
 ?>
@@ -36,37 +37,8 @@ require_once __DIR__ . '/../partials/header.php';
 <div class="container py-5">
     <div class="row">
         <!-- Sidebar -->
-        <div class="col-lg-3 mb-4">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">My Account</h5>
-                </div>
-                <div class="list-group list-group-flush">
-                    <a href="dashboard.php" class="list-group-item list-group-item-action active">
-                        <i class="bi bi-speedometer2 me-2"></i> Dashboard
-                    </a>
-                    <a href="orders.php" class="list-group-item list-group-item-action">
-                        <i class="bi bi-box-seam me-2"></i> My Orders
-                    </a>
-                    <a href="profile.php" class="list-group-item list-group-item-action">
-                        <i class="bi bi-person me-2"></i> Edit Profile
-                    </a>
-                    <a href="addresses.php" class="list-group-item list-group-item-action">
-                        <i class="bi bi-geo-alt me-2"></i> Addresses
-                    </a>
-                    <a href="wishlist.php" class="list-group-item list-group-item-action">
-                        <i class="bi bi-heart me-2"></i> Wishlist
-                    </a>
-                    <a href="change-password.php" class="list-group-item list-group-item-action">
-                        <i class="bi bi-shield-lock me-2"></i> Change Password
-                    </a>
-                    <a href="<?= BASE_URL ?>/logout.php" class="list-group-item list-group-item-action text-danger">
-    <i class="bi bi-box-arrow-right me-2"></i> Logout
-</a>
-                </div>
-            </div>
-        </div>
-        
+       <?php require_once __DIR__ . '/../partials/sidebar.php'; ?>
+
         <!-- Main Content -->
         <div class="col-lg-9">
             <!-- Welcome Card -->
@@ -91,7 +63,7 @@ require_once __DIR__ . '/../partials/header.php';
                     </div>
                 </div>
             </div>
-            
+
             <!-- Quick Stats -->
             <div class="row mb-4">
                 <div class="col-md-4 mb-3">
@@ -100,9 +72,9 @@ require_once __DIR__ . '/../partials/header.php';
                             <div class="d-flex justify-content-between">
                                 <div>
                                     <h5 class="card-title">Orders</h5>
-                                    <?php 
+                                    <?php
                                     $order_count = db_query_row(
-                                        "SELECT COUNT(*) as count FROM orders WHERE user_id = ?", 
+                                        "SELECT COUNT(*) as count FROM orders WHERE user_id = ?",
                                         [$_SESSION['user_id']]
                                     );
                                     ?>
@@ -118,16 +90,16 @@ require_once __DIR__ . '/../partials/header.php';
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="col-md-4 mb-3">
                     <div class="card h-100 shadow-sm dashboard-card">
                         <div class="card-body">
                             <div class="d-flex justify-content-between">
                                 <div>
                                     <h5 class="card-title">Wishlist</h5>
-                                    <?php 
+                                    <?php
                                     $wishlist_count = db_query_row(
-                                        "SELECT COUNT(*) as count FROM wishlist WHERE user_id = ?", 
+                                        "SELECT COUNT(*) as count FROM wishlist WHERE user_id = ?",
                                         [$_SESSION['user_id']]
                                     );
                                     ?>
@@ -143,7 +115,7 @@ require_once __DIR__ . '/../partials/header.php';
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="col-md-4 mb-3">
                     <div class="card h-100 shadow-sm dashboard-card">
                         <div class="card-body">
@@ -163,7 +135,7 @@ require_once __DIR__ . '/../partials/header.php';
                     </div>
                 </div>
             </div>
-            
+
             <!-- Recent Orders -->
             <div class="card shadow-sm">
                 <div class="card-header">
@@ -218,7 +190,7 @@ require_once __DIR__ . '/../partials/header.php';
                                 </tbody>
                             </table>
                         </div>
-                        
+
                         <div class="text-end mt-3">
                             <a href="orders.php" class="btn btn-outline-primary">View All Orders</a>
                         </div>

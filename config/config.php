@@ -41,6 +41,7 @@ require_once __DIR__ . '/../includes/validation.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/email.php';
 require_once __DIR__ . '/../includes/cart.php';
+require_once __DIR__ . '/../includes/subscription.php'; // Add this line
 
 // Initialize CSRF token
 if (!isset($_SESSION[CSRF_TOKEN_NAME]) || 
