@@ -251,3 +251,12 @@ footer .social-links a:hover {
     background-color: #28a745;
     color: #fff;
 }
+.text-bronze{
+    color: rgb(255, 201, 114) !important;
+}
+.text-silver{
+    color: rgb(184, 184, 184) !important;
+}
+.text-boronz{
+    color: rgb(255, 191, 0) !important;
+}

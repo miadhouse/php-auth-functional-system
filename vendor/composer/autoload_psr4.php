@@ -7,4 +7,6 @@ $baseDir = dirname($vendorDir);
 
 return array(
     'PHPMailer\\PHPMailer\\' => array($vendorDir . '/phpmailer/phpmailer/src'),
+    'Aqayepardakht\\PhpSdk\\' => array($vendorDir . '/aqayepardakht/php-sdk/src'),
+    'Aqayepardakht\\Http\\' => array($vendorDir . '/aqayepardakht/http/src'),
 );
