@@ -1,6 +1,6 @@
 <?php
 /**
- * Subscription Subscribe Page
+ * Updated Subscription Subscribe Page with Payment Receipt
  * PHP 8.4 Pure Functional Script
  * Save as: subscription/subscribe.php
  */
@@ -8,6 +8,7 @@
 // Include configuration
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/subscription.php';
+require_once __DIR__ . '/../includes/payment_receipts.php';
 
 // Check if user is logged in
 if (!is_logged_in()) {
@@ -46,8 +47,15 @@ if ($current_subscription) {
 
 // Calculate pricing
 $amount = $billing_cycle === 'yearly' ? $plan['price_yearly'] : $plan['price_monthly'];
-$trial_days = !$is_changing_plan ? $plan['trial_days'] : 0;
+$is_free_plan = $amount <= 0;
 $savings = $billing_cycle === 'yearly' ? ($plan['price_monthly'] * 12) - $plan['price_yearly'] : 0;
+
+// Get bank account info and payment instructions
+$bank_info = get_bank_account_info();
+$payment_instructions = get_payment_instructions();
+
+// Check if user can submit receipt
+$can_submit = can_submit_receipt($_SESSION['user_id'], $plan['id']);
 
 // Handle form submission
 $subscription_result = null;
@@ -61,28 +69,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $action = $_POST['action'] ?? '';
         
-        if ($action === 'subscribe') {
-            if ($is_changing_plan) {
-                // Change existing subscription
-                $subscription_result = change_subscription_plan(
-                    $current_subscription['id'], 
-                    $plan['id'], 
-                    $billing_cycle
-                );
-            } else {
-                // Create new subscription
-                $subscription_result = create_subscription(
-                    $_SESSION['user_id'], 
-                    $plan['id'], 
-                    $billing_cycle, 
-                    $trial_days > 0
-                );
-            }
+        if ($action === 'activate_free') {
+            // Activate free plan
+            $subscription_result = activate_free_plan($_SESSION['user_id'], $plan['id']);
             
             if ($subscription_result['status']) {
-                // Redirect to success page or dashboard
                 set_flash_message('success', $subscription_result['message']);
                 redirect('../user/subscription.php');
+            }
+        } elseif ($action === 'submit_receipt') {
+            // Handle receipt upload
+            if (!isset($_FILES['receipt_file'])) {
+                $subscription_result = [
+                    'status' => false,
+                    'message' => 'لطفاً فیش پرداخت را انتخاب کنید'
+                ];
+            } else {
+                // Upload receipt file
+                $upload_result = upload_receipt_file($_FILES['receipt_file'], $_SESSION['user_id']);
+                
+                if ($upload_result['status']) {
+                    // Submit payment receipt
+                    $receipt_data = [
+                        'receipt_image' => $upload_result['filepath'],
+                        'bank_name' => $_POST['bank_name'] ?? '',
+                        'transaction_id' => $_POST['transaction_id'] ?? '',
+                        'payment_date' => $_POST['payment_date'] ?? date('Y-m-d'),
+                        'description' => $_POST['description'] ?? ''
+                    ];
+                    
+                    $subscription_result = submit_payment_receipt(
+                        $_SESSION['user_id'], 
+                        $plan['id'], 
+                        $billing_cycle, 
+                        $receipt_data
+                    );
+                    
+                    if ($subscription_result['status']) {
+                        set_flash_message('success', $subscription_result['message']);
+                        redirect('../user/subscription.php');
+                    }
+                } else {
+                    $subscription_result = $upload_result;
+                }
             }
         }
     }
@@ -127,16 +156,21 @@ require_once __DIR__ . '/../partials/header.php';
                         </div>
                         <div class="col-md-4 text-md-end">
                             <div class="pricing-display">
-                                <div class="h2 mb-0">
-                                    <?= format_price($amount) ?>
-                                </div>
-                                <div class="small">
-                                    per <?= $billing_cycle === 'yearly' ? 'year' : 'month' ?>
-                                </div>
-                                <?php if ($billing_cycle === 'yearly' && $savings > 0): ?>
-                                    <div class="badge bg-light text-dark mt-2">
-                                        Save <?= format_price($savings) ?> yearly
+                                <?php if ($is_free_plan): ?>
+                                    <div class="h2 mb-0 text-success">FREE</div>
+                                    <div class="small">Forever</div>
+                                <?php else: ?>
+                                    <div class="h2 mb-0">
+                                        <?= format_price($amount) ?>
                                     </div>
+                                    <div class="small">
+                                        per <?= $billing_cycle === 'yearly' ? 'year' : 'month' ?>
+                                    </div>
+                                    <?php if ($billing_cycle === 'yearly' && $savings > 0): ?>
+                                        <div class="badge bg-light text-dark mt-2">
+                                            Save <?= format_price($savings) ?> yearly
+                                        </div>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -199,41 +233,19 @@ require_once __DIR__ . '/../partials/header.php';
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Amount:</span>
-                                    <strong><?= format_price($amount) ?></strong>
+                                    <strong><?= $is_free_plan ? 'FREE' : format_price($amount) ?></strong>
                                 </div>
-                                
-                                <?php if ($trial_days > 0): ?>
-                                    <div class="d-flex justify-content-between mb-2">
-                                        <span>Free Trial:</span>
-                                        <strong class="text-success"><?= $trial_days ?> days</strong>
-                                    </div>
-                                    <div class="d-flex justify-content-between">
-                                        <span>First Charge:</span>
-                                        <strong><?= date('M j, Y', strtotime("+{$trial_days} days")) ?></strong>
-                                    </div>
-                                <?php else: ?>
-                                    <div class="d-flex justify-content-between">
-                                        <span>First Charge:</span>
-                                        <strong>Today</strong>
-                                    </div>
-                                <?php endif; ?>
+                                <div class="d-flex justify-content-between">
+                                    <span>Activation:</span>
+                                    <strong><?= $is_free_plan ? 'Immediate' : 'After payment verification' ?></strong>
+                                </div>
                             </div>
-                            
-                            <?php if ($trial_days > 0): ?>
-                                <div class="alert alert-info">
-                                    <i class="bi bi-gift me-2"></i>
-                                    <strong>Free Trial Included!</strong><br>
-                                    Try <?= h($plan['name']) ?> free for <?= $trial_days ?> days. 
-                                    Cancel anytime during your trial at no charge.
-                                </div>
-                            <?php endif; ?>
                             
                             <?php if ($is_changing_plan): ?>
                                 <div class="alert alert-warning">
                                     <i class="bi bi-arrow-up-circle me-2"></i>
                                     <strong>Plan Change</strong><br>
                                     You're changing from <strong><?= h($current_subscription['plan_name']) ?></strong> to <strong><?= h($plan['name']) ?></strong>.
-                                    The change will take effect immediately.
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -241,213 +253,229 @@ require_once __DIR__ . '/../partials/header.php';
                 </div>
             </div>
             
-            <!-- Billing Cycle Selection -->
-            <div class="card shadow-sm mb-4">
-                <div class="card-body">
-                    <h5 class="fw-bold mb-3">Choose Billing Cycle</h5>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="card <?= $billing_cycle === 'monthly' ? 'border-primary' : 'border-light' ?> h-100">
-                                <div class="card-body text-center">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="billing_cycle" id="monthly" value="monthly" <?= $billing_cycle === 'monthly' ? 'checked' : '' ?>>
-                                        <label class="form-check-label fw-bold" for="monthly">
-                                            Monthly Billing
-                                        </label>
-                                    </div>
-                                    <div class="h4 mt-2"><?= format_price($plan['price_monthly']) ?></div>
-                                    <div class="text-muted">per month</div>
-                                    <div class="small text-muted mt-2">Billed monthly</div>
-                                </div>
-                            </div>
+            <?php if ($is_free_plan): ?>
+                <!-- Free Plan Activation -->
+                <div class="card shadow-sm">
+                    <div class="card-body text-center py-4">
+                        <div class="mb-4">
+                            <i class="bi bi-gift text-success" style="font-size: 3rem;"></i>
                         </div>
+                        <h4>Activate Free Plan</h4>
+                        <p class="text-muted mb-4">This plan is completely free and will be activated immediately.</p>
                         
-                        <div class="col-md-6">
-                            <div class="card <?= $billing_cycle === 'yearly' ? 'border-primary' : 'border-light' ?> h-100 position-relative">
-                                <?php if ($savings > 0): ?>
-                                    <div class="position-absolute top-0 start-50 translate-middle">
-                                        <span class="badge bg-success px-3 py-2">Save <?= format_price($savings) ?></span>
-                                    </div>
-                                <?php endif; ?>
-                                
-                                <div class="card-body text-center">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="billing_cycle" id="yearly" value="yearly" <?= $billing_cycle === 'yearly' ? 'checked' : '' ?>>
-                                        <label class="form-check-label fw-bold" for="yearly">
-                                            Yearly Billing
-                                        </label>
-                                    </div>
-                                    <div class="h4 mt-2"><?= format_price($plan['price_yearly']) ?></div>
-                                    <div class="text-muted">per year</div>
-                                    <div class="small text-success mt-2">
-                                        <?= $savings > 0 ? 'Save ' . round((($plan['price_monthly'] * 12 - $plan['price_yearly']) / ($plan['price_monthly'] * 12)) * 100) . '%' : 'Best Value' ?>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Terms and Subscribe -->
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <form method="post" id="subscribeForm">
-                        <input type="hidden" name="csrf_token" value="<?= get_csrf_token() ?>">
-                        <input type="hidden" name="action" value="subscribe">
-                        <input type="hidden" name="plan_id" value="<?= $plan['id'] ?>">
-                        <input type="hidden" name="billing_cycle" value="<?= $billing_cycle ?>" id="selected_billing_cycle">
-                        
-                        <!-- Terms Agreement -->
-                        <div class="form-check mb-4">
-                            <input class="form-check-input" type="checkbox" id="terms_agreement" name="terms_agreement" required>
-                            <label class="form-check-label" for="terms_agreement">
-                                I agree to the <a href="../terms.php" target="_blank">Terms of Service</a> and 
-                                <a href="../privacy.php" target="_blank">Privacy Policy</a>
-                            </label>
-                        </div>
-                        
-                        <!-- Subscribe Button -->
-                        <div class="d-grid gap-2 d-md-flex justify-content-md-between">
-                            <a href="plans.php" class="btn btn-outline-secondary">
-                                <i class="bi bi-arrow-left me-1"></i>
-                                Back to Plans
-                            </a>
+                        <form method="post">
+                            <input type="hidden" name="csrf_token" value="<?= get_csrf_token() ?>">
+                            <input type="hidden" name="action" value="activate_free">
                             
-                            <button type="submit" class="btn btn-<?= get_plan_type_color($plan['plan_type']) ?> btn-lg" id="subscribeBtn">
-                                <?php if ($trial_days > 0 && !$is_changing_plan): ?>
-                                    <i class="bi bi-gift me-2"></i>
-                                    Start Free Trial
-                                <?php elseif ($is_changing_plan): ?>
-                                    <i class="bi bi-arrow-up-circle me-2"></i>
-                                    Change Plan
-                                <?php else: ?>
-                                    <i class="bi bi-credit-card me-2"></i>
-                                    Subscribe Now
-                                <?php endif; ?>
-                            </button>
-                        </div>
-                        
-                        <div class="text-center mt-3">
-                            <small class="text-muted">
-                                <?php if ($trial_days > 0 && !$is_changing_plan): ?>
-                                    Your trial starts immediately. No payment required until <?= date('M j, Y', strtotime("+{$trial_days} days")) ?>.
-                                <?php else: ?>
-                                    You can cancel your subscription at any time from your account settings.
-                                <?php endif; ?>
-                            </small>
-                        </div>
-                    </form>
+                            <div class="form-check d-inline-block mb-4">
+                                <input class="form-check-input" type="checkbox" id="terms_agreement" name="terms_agreement" required>
+                                <label class="form-check-label" for="terms_agreement">
+                                    I agree to the <a href="../terms.php" target="_blank">Terms of Service</a> and 
+                                    <a href="../privacy.php" target="_blank">Privacy Policy</a>
+                                </label>
+                            </div>
+                            
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="bi bi-check-circle me-2"></i>
+                                    Activate Free Plan
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
-            </div>
-            
-            <!-- FAQ Section -->
-            <div class="mt-5">
-                <h4 class="fw-bold mb-4">Frequently Asked Questions</h4>
                 
-                <div class="accordion" id="faqAccordion">
-                    <div class="accordion-item">
-                        <h2 class="accordion-header" id="faq1">
-                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#faqCollapse1">
-                                What happens during my free trial?
-                            </button>
-                        </h2>
-                        <div id="faqCollapse1" class="accordion-collapse collapse show" data-bs-parent="#faqAccordion">
-                            <div class="accordion-body">
-                                During your free trial, you have full access to all features of your chosen plan. 
-                                No credit card is required, and you can cancel anytime before the trial ends without any charges.
+            <?php else: ?>
+                <!-- Payment Receipt Upload -->
+                <?php if (!$can_submit['can_submit']): ?>
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <?= h($can_submit['message']) ?>
+                    </div>
+                    <div class="text-center">
+                        <a href="plans.php" class="btn btn-outline-primary">Back to Plans</a>
+                    </div>
+                <?php else: ?>
+                    <!-- Bank Account Information -->
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-bank me-2"></i>Payment Information</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <?= h($payment_instructions) ?>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6 class="fw-bold">Bank Account Details</h6>
+                                    <table class="table table-bordered">
+                                        <tr>
+                                            <td><strong>Bank Name:</strong></td>
+                                            <td><?= h($bank_info['bank_name']) ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Account Number:</strong></td>
+                                            <td><?= h($bank_info['account_number']) ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>SHEBA:</strong></td>
+                                            <td><?= h($bank_info['sheba']) ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Account Holder:</strong></td>
+                                            <td><?= h($bank_info['account_holder']) ?></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6 class="fw-bold">Payment Amount</h6>
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h3 class="text-primary"><?= format_price($amount) ?></h3>
+                                            <p class="mb-0"><?= ucfirst($billing_cycle) ?> subscription</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                     
-                    <div class="accordion-item">
-                        <h2 class="accordion-header" id="faq2">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faqCollapse2">
-                                Can I change my plan later?
-                            </button>
-                        </h2>
-                        <div id="faqCollapse2" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                            <div class="accordion-body">
-                                Yes! You can upgrade or downgrade your plan at any time from your account settings. 
-                                When you upgrade, changes take effect immediately. When you downgrade, changes take effect at your next billing cycle.
-                            </div>
+                    <!-- Upload Receipt Form -->
+                    <div class="card shadow-sm">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Upload Payment Receipt</h5>
+                        </div>
+                        <div class="card-body">
+                            <form method="post" enctype="multipart/form-data" id="receiptForm">
+                                <input type="hidden" name="csrf_token" value="<?= get_csrf_token() ?>">
+                                <input type="hidden" name="action" value="submit_receipt">
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="receipt_file" class="form-label">
+                                                <i class="bi bi-file-earmark-image me-1"></i>
+                                                Payment Receipt *
+                                            </label>
+                                            <input type="file" class="form-control" id="receipt_file" name="receipt_file" 
+                                                   accept="image/*,.pdf" required>
+                                            <div class="form-text">Supported formats: JPG, PNG, GIF, PDF (Max: 5MB)</div>
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label for="bank_name" class="form-label">Bank Name</label>
+                                            <input type="text" class="form-control" id="bank_name" name="bank_name" 
+                                                   placeholder="e.g., Bank Melli Iran">
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label for="transaction_id" class="form-label">Transaction ID</label>
+                                            <input type="text" class="form-control" id="transaction_id" name="transaction_id" 
+                                                   placeholder="e.g., 123456789">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="payment_date" class="form-label">Payment Date *</label>
+                                            <input type="date" class="form-control" id="payment_date" name="payment_date" 
+                                                   value="<?= date('Y-m-d') ?>" required>
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label for="description" class="form-label">Additional Notes</label>
+                                            <textarea class="form-control" id="description" name="description" rows="3" 
+                                                      placeholder="Any additional information about the payment..."></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Terms Agreement -->
+                                <div class="form-check mb-4">
+                                    <input class="form-check-input" type="checkbox" id="terms_agreement" name="terms_agreement" required>
+                                    <label class="form-check-label" for="terms_agreement">
+                                        I agree to the <a href="../terms.php" target="_blank">Terms of Service</a> and 
+                                        <a href="../privacy.php" target="_blank">Privacy Policy</a>
+                                    </label>
+                                </div>
+                                
+                                <!-- Submit Button -->
+                                <div class="d-grid gap-2 d-md-flex justify-content-md-between">
+                                    <a href="plans.php" class="btn btn-outline-secondary">
+                                        <i class="bi bi-arrow-left me-1"></i>
+                                        Back to Plans
+                                    </a>
+                                    
+                                    <button type="submit" class="btn btn-<?= get_plan_type_color($plan['plan_type']) ?> btn-lg" id="submitBtn">
+                                        <i class="bi bi-upload me-2"></i>
+                                        Submit Payment Receipt
+                                    </button>
+                                </div>
+                                
+                                <div class="text-center mt-3">
+                                    <small class="text-muted">
+                                        Your subscription will be activated after admin verification of your payment receipt.
+                                        This usually takes 1-2 business days.
+                                    </small>
+                                </div>
+                            </form>
                         </div>
                     </div>
-                    
-                    <div class="accordion-item">
-                        <h2 class="accordion-header" id="faq3">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faqCollapse3">
-                                How can I cancel my subscription?
-                            </button>
-                        </h2>
-                        <div id="faqCollapse3" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                            <div class="accordion-body">
-                                You can cancel your subscription anytime from your account settings. 
-                                When you cancel, you'll continue to have access until the end of your current billing period.
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="accordion-item">
-                        <h2 class="accordion-header" id="faq4">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faqCollapse4">
-                                What payment methods do you accept?
-                            </button>
-                        </h2>
-                        <div id="faqCollapse4" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                            <div class="accordion-body">
-                                We accept all major credit cards (Visa, MasterCard, American Express), PayPal, and bank transfers for annual subscriptions. 
-                                All payments are processed securely through our payment partners.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                <?php endif; ?>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
-<!-- JavaScript for billing cycle selection -->
+<!-- JavaScript -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const monthlyRadio = document.getElementById('monthly');
-    const yearlyRadio = document.getElementById('yearly');
-    const billingCycleInput = document.getElementById('selected_billing_cycle');
-    const subscribeForm = document.getElementById('subscribeForm');
+    const receiptForm = document.getElementById('receiptForm');
     
-    // Handle billing cycle change
-    function updateBillingCycle() {
-        const selectedCycle = monthlyRadio.checked ? 'monthly' : 'yearly';
-        billingCycleInput.value = selectedCycle;
+    if (receiptForm) {
+        receiptForm.addEventListener('submit', function(e) {
+            const submitBtn = document.getElementById('submitBtn');
+            const termsAgreement = document.getElementById('terms_agreement');
+            const receiptFile = document.getElementById('receipt_file');
+            
+            if (!termsAgreement.checked) {
+                e.preventDefault();
+                alert('Please agree to the Terms of Service and Privacy Policy to continue.');
+                return false;
+            }
+            
+            if (!receiptFile.files.length) {
+                e.preventDefault();
+                alert('Please select a payment receipt file.');
+                return false;
+            }
+            
+            // Check file size (5MB)
+            if (receiptFile.files[0].size > 5242880) {
+                e.preventDefault();
+                alert('File size should not exceed 5MB.');
+                return false;
+            }
+            
+            // Disable button and show loading state
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Processing...';
+        });
         
-        // Update URL to reflect billing cycle
-        const url = new URL(window.location);
-        url.searchParams.set('billing', selectedCycle);
-        window.history.replaceState({}, '', url);
-        
-        // Reload page to update pricing
-        window.location.href = url.toString();
-    }
-    
-    monthlyRadio.addEventListener('change', updateBillingCycle);
-    yearlyRadio.addEventListener('change', updateBillingCycle);
-    
-    // Handle form submission
-    subscribeForm.addEventListener('submit', function(e) {
-        const subscribeBtn = document.getElementById('subscribeBtn');
-        const termsAgreement = document.getElementById('terms_agreement');
-        
-        if (!termsAgreement.checked) {
-            e.preventDefault();
-            alert('Please agree to the Terms of Service and Privacy Policy to continue.');
-            return false;
+        // File preview
+        const receiptFile = document.getElementById('receipt_file');
+        if (receiptFile) {
+            receiptFile.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const fileSize = (file.size / 1024 / 1024).toFixed(2);
+                    console.log(`Selected file: ${file.name} (${fileSize} MB)`);
+                }
+            });
         }
-        
-        // Disable button and show loading state
-        subscribeBtn.disabled = true;
-        subscribeBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Processing...';
-    });
+    }
 });
 </script>
 
